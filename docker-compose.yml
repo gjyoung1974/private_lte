@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  # EPC (Core Network) - runs MME, HSS, and SPGW
+  epc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pluto-lte-epc
+    hostname: epc
+    command: srsepc
+    volumes:
+      - ./configs:/etc/srsran:ro
+      - epc-logs:/tmp
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    sysctls:
+      - net.ipv4.ip_forward=1
+    networks:
+      lte-network:
+        ipv4_address: 172.20.0.10
+    restart: unless-stopped
+
+  # eNodeB (Base Station)
+  enb:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pluto-lte-enb
+    hostname: enb
+    command: srsenb
+    volumes:
+      - ./configs:/etc/srsran:ro
+      - enb-logs:/tmp
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+      - IPC_LOCK
+    ulimits:
+      memlock: -1
+      rtprio: 99
+    devices:
+      # USB passthrough for PlutoSDR (adjust as needed)
+      - /dev/bus/usb:/dev/bus/usb
+    environment:
+      - PLUTO_IP=192.168.2.1
+    depends_on:
+      - epc
+    networks:
+      lte-network:
+        ipv4_address: 172.20.0.11
+      # Need access to PlutoSDR network
+      pluto-network:
+        ipv4_address: 192.168.2.10
+    restart: unless-stopped
+
+  # Combined mode - runs EPC and eNB in single container
+  pluto-lte:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pluto-lte-combined
+    hostname: pluto-lte
+    command: all
+    profiles:
+      - combined
+    volumes:
+      - ./configs:/etc/srsran:ro
+      - combined-logs:/tmp
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+      - IPC_LOCK
+    ulimits:
+      memlock: -1
+      rtprio: 99
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    environment:
+      - PLUTO_IP=192.168.2.1
+    network_mode: host
+    privileged: true
+    restart: unless-stopped
+
+networks:
+  lte-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+  pluto-network:
+    driver: macvlan
+    driver_opts:
+      parent: eth0  # Adjust to your network interface
+    ipam:
+      config:
+        - subnet: 192.168.2.0/24
+          gateway: 192.168.2.1
+
+volumes:
+  epc-logs:
+  enb-logs:
+  combined-logs:
